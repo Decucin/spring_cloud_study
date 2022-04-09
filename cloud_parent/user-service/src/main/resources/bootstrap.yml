@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: userservice # dataId的一部分
+  profiles:
+    active: dev # 开发环境  # dataId的一部分
+  cloud:
+    nacos:
+      server-addr: localhost:8848 # nacos服务端地址（实际上服务端就是之前安装的本机服务）
+      config:
+        file-extension: yaml
