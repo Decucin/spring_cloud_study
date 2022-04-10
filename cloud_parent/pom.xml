@@ -12,6 +12,8 @@
         <module>eureka-server</module>
         <module>order-service</module>
         <module>user-service</module>
+        <module>feign-api</module>
+        <module>gateway</module>
     </modules>
 
     <parent>

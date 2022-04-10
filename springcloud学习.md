@@ -364,3 +364,323 @@ cloud:
 
    * 修改conf/nginx.conf文件并配置
    * 修改bootstrap.yml中的server-addr为localhost:80（看nginx怎么配的）
+
+# Http客户端Feigh
+
+RestTemplete方式是在请求中将URL作为变量传入，但若是遇到较为复杂的路径，那么维护起来就会比较困难。
+
+## 定义和使用Feign
+
+1. 引入依赖
+
+   ````xml
+   <dependency>
+       <groupId>org.springframework.cloud</groupId>
+       <artifactId>spring-cloud-starter-openfeign</artifactId>
+   </dependency>
+   ````
+
+2. 在主启动类中通过@EnableFeignClients开启feign的功能。
+
+3. 编写feign客户端：需要包含的信息有服务名称、请求方式、请求路径、请求参数以及返回值类型
+
+## Feign的自定义配置
+
+|        类型         |       作用       |                          说明                          |
+| :-----------------: | :--------------: | :----------------------------------------------------: |
+| feign.logger.level  |   修改日志级别   |            None(默认), Basic, Headers, Full            |
+| feign.codec.Decoder | 响应结果的解析器 |   http远程调用的结果做解析，例如解析json字符串为对象   |
+| feign.codec.Encoder |   请求参数编码   |          将请求参数编码，便于通过http请求发送          |
+|   feign.Contract    |  支持的注解格式  |                 默认是SpringMVC的注解                  |
+|    feign.Retryer    |   失败重试机制   | 请求的失败重试机制，默认是没有，不过会使用Ribbon的重试 |
+
+### 修改日志界别的方式
+
+1. 配置文件中修改
+
+   * 全局生效
+
+     ````yaml
+     feign:
+       client:
+         config: 
+           default:  # default表示全局
+             loggerLevel: FULL
+     ````
+
+   * 局部生效
+
+     ````yaml
+     feign:
+       client:
+         config: 
+           userservice :  # 针对某个服务
+             loggerLevel: FULL
+     ````
+
+2. 使用Java代码实现
+
+   1. 先声明一个bean
+
+      ````java
+      public class DefaultFeignConfiguration {
+      
+          @Bean
+          public Logger.Level logLevel(){
+              return Logger.Level.BASIC;
+          }
+      
+      }
+      ````
+
+   2. 如果是全局配置，把它配置到@EnableFeignClients之中，这个注解是在主启动类上
+
+      ````java
+      @EnableFeignClients(defaultConfiguration = DefaultFeignConfiguration.class)
+      ````
+
+      如果是局部配置，把它配置到@FeignClient上
+
+      ````java
+      @FeignClient(value = "userservice", configuration = DefaultFeignConfiguration.class)
+      ````
+
+## Feign的性能优化
+
+Fiegn底层客户端实现：
+
+* URLConnection：默认实现，不支持连接池
+* Apache HttpClient：支持连接池
+* OKHttp：支持连接池
+
+Feign的性能优化主要包括以下几个方面：
+
+1. 使用连接池代替URLConnection
+2. 日志最好使用Basic或者None
+
+### 使用连接池代替URLConnection（HttpClient为例）
+
+1. 引入依赖
+
+   ````xml
+   <dependency>
+       <groupId>io.github.openfeign</groupId>
+       <artifactId>feign-httpclient</artifactId>
+   </dependency>
+   ````
+
+2. 配置连接池
+
+   ````yaml
+   feign:
+     httpclient:
+       enabled: true # 开启
+       max-connections: 200
+       max-connections-per-route: 50
+   ````
+
+## Feign最佳实践
+
+1. 继承：给消费者的Client和提供者的Controller定义统一的父接口作为标准	--->	耦合度过高，此外方法参数无法继承
+2. 抽取：将FeighClient单独抽取为独立模块，并把接口相关的POJO，默认的Feign配置都放到这里，提供给所有消费者使用。
+
+### 抽取FeignClient
+
+1. 创建module，命名为feign-api并引入Feign的starter依赖
+2. 将orderservice中编写的UserClient，User，DefaultConfiguration复制到其中
+3. orderservice中引入依赖
+4. 修改order-service的代码，将其改为feign-api中的部分
+
+这里会出现问题：当FeignClient不在扫描包范围内时，这些FeignClient无法使用，有两种方式解决：
+
+1. 指定FeignClient所在的包
+
+   ```java
+   @EnableFeignClients(defaultConfiguration = DefaultFeignConfiguration.class, basePackages = "com.decucin.feign.clients")
+   ```
+
+2. 指定FeignClient字节码文件
+
+   ```java
+   @EnableFeignClients(defaultConfiguration = DefaultFeignConfiguration.class, clients = UserClient.class)
+   ```
+
+# 统一网关Gateway
+
+网关的必要性：直接将服务队外暴露有很多安全隐患，比如说有的服务只允许内部调用。
+
+网关的作用：
+
+* 身份认证和权限校验
+* 服务路由、负载均衡
+* 请求限流
+
+springcloud网关的选择：
+
+* Gateway：基于Webflux实现，属于响应式编程
+* Zuul：基于servlet实现，属于阻塞式编程
+
+### 基于Gateway的实现
+
+1. 创建相应module，引入Gateway和nacos发现依赖
+
+   ```xml
+   <dependencies>
+   
+       <!--    nacos服务发现依赖 -->
+       <dependency>
+           <groupId>com.alibaba.cloud</groupId>
+           <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+       </dependency>
+   
+   		<!--	gateway依赖	-->
+       <dependency>
+           <groupId>org.springframework.cloud</groupId>
+           <artifactId>spring-cloud-starter-gateway</artifactId>
+       </dependency>
+   </dependencies>
+   ```
+
+2. 编写路由配置及nacos地址
+
+   ````yaml
+   server:
+     port: 10010
+   
+   spring:
+     application:
+       name: gateway
+     cloud:
+       nacos:
+         server-addr: 8848
+       gateway:
+         routes:
+           - id: user-service # 自定义的唯一标识，必须唯一
+             uri: lb://userservice # 路由的目标地址，也可使用http://localhost:8081写死，但不推荐
+             predicates:   # 判断请求是否符合规则
+               - Path=/user/** # 路径断言，判断是否以/user开头，如果是则符合
+           - id: order-service
+             uri: lb://orderservice
+             predicates:
+               - Path=/order/**
+             # 这里还可以对路由过滤器进行配置
+   ````
+
+请求过程解析：
+
+1. 用户请求网关
+2. 网关根据路由规则判断选择路由
+3. 网关从nacos拉取服务列表
+4. 负载均衡发送请求
+
+#### 路由断言及断言工厂
+
+配置对断言会被断言工厂解析并处理，转换为路由判断的条件。
+
+Spring中基本的断言工厂：
+
+|    名称    |           说明           |                             实例                             |
+| :--------: | :----------------------: | :----------------------------------------------------------: |
+|   After    |  是某个时间点之后的请求  |    \- After=2017-01-20T17:42:47.789-07:00[America/Denver]    |
+|   Before   |  是某个时间点之前的请求  |   \- Before=2017-01-20T17:42:47.789-07:00[America/Denver]    |
+|  Between   | 是某两个时间点之间的请求 | \- Between=2017-01-20T17:42:47.789-07:00[America/Denver], 2017-01-21T17:42:47.789-07:00[America/Denver] |
+|   Cookie   |  请求必须包含某些cookie  |                  \- Cookie=chocolate, ch.p                   |
+|   Header   |  请求必须包含某些header  |                 \- Header=X-Request-Id, \d+                  |
+|    Host    |  请求必须是访问某些host  |        \- Host=** .somehost.org, ** .anotherhost.org         |
+|   Method   |    请求必须是指定方式    |                      \- Method=GET,POST                      |
+|    Path    | 请求路径必须符合指定规则 |            \- Path=/red/{segment},/blue/{segment}            |
+|   Query    | 请求参数必须包含指定参数 |                        \- Query=green                        |
+| RemoteAddr | 请求者的ip必须是指定范围 |                 \- RemoteAddr=192.168.1.1/24                 |
+|   Weight   |         权重处理         |                     \- Weight=group1, 2                      |
+
+#### 路由过滤器及过滤器工厂
+
+对进入网关的请求和微服务返回的响应做处理(spring提供了三十多种)。
+
+* 默认过滤器：对所有路由都生效
+
+* 局部过滤器：只对局部请求有效
+
+  ````xml
+  cloud:
+      nacos:
+        server-addr: localhost:8848
+      gateway:
+        routes:
+          - id: user-service # 自定义的唯一标识，必须唯一
+            uri: lb://userservice # 路由的目标地址，也可使用http://localhost:8081写死，但不推荐
+            predicates:   # 判断请求是否符合规则
+              - Path=/user/** # 路径断言，判断是否以/user开头，如果是则符合
+  #          filters: # 过滤器
+  #            - AddRequestHeader=Truth,Decucin is awesome!  # 添加请求头
+          - id: order-service
+            uri: lb://orderservice
+            predicates:
+              - Path=/order/**
+  #            - After=2031-01-20T17:42:47.789-07:00[America/Denver]
+        default-filters: # 注意这里和routes一级
+          - AddRequestHeader=Truth,Decucin is awesome!  # 添加请求头
+  ````
+
+* 全局过滤器：与默认过滤器类似，但与前两者不同的是可以实现自定义逻辑操作 ---->实现GlobalFilter接口
+
+  ````java
+  //@Order(-1)
+  @Component
+  public class AuthorizeFilter implements GlobalFilter, Ordered {
+      @Override
+      public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+          //  1.获取请求参数
+          ServerHttpRequest request = exchange.getRequest();
+          MultiValueMap<String, String> params = request.getQueryParams();
+          //  2.获取参数中的对应字段
+          String auth = params.getFirst("authorization");
+  
+          //  3.判断该字段是否合理，合理就放行
+          if("admin".equals(auth)){
+              return chain.filter(exchange);
+          }
+  
+          //  4.不合理就拦截，并设置状态码
+          exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+          return exchange.getResponse().setComplete();
+      }
+  
+      @Override
+      public int getOrder() {
+          return -1;
+      }
+  }
+  ````
+
+过滤器执行顺序：
+
+默认过滤器和局部过滤器的order值是spring指定的，按照配置文件中的声明顺序从1开始递增，如果order值相同，那么默认过滤器>路由过滤器（局部过滤器）>全局过滤器。
+
+### 网关跨域问题处理
+
+跨域：域名不同、域名相同端口不同。浏览器禁止请求的发起者与服务端发生跨域ajax请求，该请求会被浏览器拦截。
+
+解决方案：CORS，网关也是类似，只需要进行相应配置即可。
+
+````yaml
+default-filters: # 注意这里和routes一级
+        - AddRequestHeader=Truth,Decucin is awesome!  # 添加请求头
+      globalcors:
+        add-to-simple-url-handler-mapping: true # 防止option请求被拦截
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: # 允许哪些网站的跨域请求
+              - "http://localhost:8090"
+              - "http://www.leyou.com"
+            allowedMethods:
+              - "GET"
+              - "POST"
+              - "DELETE"
+              - "PUT"
+              - "OPTIONS"
+            allowedHeaders: "*" # 允许在请求中携带的头信息
+            allowCredentials: true  # 是否允许携带cookie
+            maxAge: 360000  # 本次跨域的有效期
+````
+

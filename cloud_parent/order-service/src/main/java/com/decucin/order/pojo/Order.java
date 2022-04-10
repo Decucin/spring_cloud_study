@@ -1,6 +1,6 @@
 package com.decucin.order.pojo;
 
-import com.decucin.user.pojo.User;
+import com.decucin.feign.pojo.User;
 import lombok.Data;
 
 @Data
